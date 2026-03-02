@@ -2431,11 +2431,7 @@ class CourseRun(ManageHistoryMixin, DraftModelMixin, CachedMixin, TimeStampedMod
             'LOBs (i.e; ExecEd & Bootcamps).'
         )
     )
-    
-    course_duration_override = models.PositiveIntegerField(
-        null=True, blank=True, help_text=_('This field contains override course duration value.'),
-        verbose_name=_('Course Duration Override')
-    )
+
     course_difficulty = models.CharField(
         max_length=255, null=True, blank=True, verbose_name=_("Course Difficulty")
     )
@@ -4688,9 +4684,9 @@ class PersonSocialNetwork(TimeStampedModel):
         YOUTUBE: _('Youtube'),
         SKYPE: _('Skype'),
         INSTAGRAM: _('Instagram'),
-        GITHUB: _('github'),
-        STACKOVERFLOW: _('stackoverflow'),
-        MEDIUM: _('medium'),
+        GITHUB: _('GitHub'),
+        STACKOVERFLOW: _('Stack Overflow'),
+        MEDIUM: _('Medium'),
         TWITTER: _('Twitter'),
         BLOG: _('Blog'),
         OTHERS: _('Others'),
