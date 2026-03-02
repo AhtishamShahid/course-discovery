@@ -4888,6 +4888,10 @@ class BulkOperationTask(TimeStampedModel):
         blank=False,
         null=False
     )
+    uploaded_by = models.ForeignKey(
+        User,
+        models.CASCADE,
+        related_name='bulk_operation_tasks',
         null=True,
         blank=True,
         help_text=_('User who uploaded the file')
