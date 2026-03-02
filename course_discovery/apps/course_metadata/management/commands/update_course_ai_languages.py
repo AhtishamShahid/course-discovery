@@ -69,7 +69,7 @@ class Command(BaseCommand):
             course_runs = course_runs.marketable()
 
         # Reduce the memory usage
-        course_runs = course_runs.iterator(chunk_size=settings.ITERATOR_CHUNK_SIZE)
+        course_runs = course_runs.iterator()
 
         for course_run in course_runs:
             try:

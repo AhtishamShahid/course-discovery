@@ -1,13 +1,17 @@
 {% load i18n %}
 
 {% blocktrans trimmed %}
-    Hi Course Team,
+    Dear {{ recipient_name }},
 {% endblocktrans %}
 
 {% blocktrans trimmed %}
-    The About page for the {{ course_run_number }} course run of {{ course_name }} has been submitted for publishing. The new session will appear on the edX website following the next couple of deployments—typically within 24 to 48 business hours.
+    The About page for the {{ course_run_number }} course run of {{ course_name }} has been published. No further action is necessary.
 {% endblocktrans %}
 
 {% blocktrans trimmed %}
-    Note: This is a no-reply email. For any questions or comments, please contact your Project Coordinator at 
-{% endblocktrans %}{% for contact_us_email in contact_us_emails %}{% if forloop.last %} {{ contact_us_email }} {% else %} {{ contact_us_email }} ,{% endif %}{% endfor %}
+    View this About page. {{ preview_url }}
+{% endblocktrans %}
+
+{% blocktrans trimmed %}
+    Note: This email address is unable to receive replies. For questions or comments, please contact your Project Coordinator(s):
+{% endblocktrans %}{% for contact_us_email in contact_us_emails %}{% if forloop.last %}{{ contact_us_email }}{% else %}{{ contact_us_email }},{% endif %}{% endfor %}

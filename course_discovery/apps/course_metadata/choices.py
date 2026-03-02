@@ -52,8 +52,9 @@ class BulkOperationType(models.TextChoices):
     The types of bulk operations that can be performed.
     """
     CourseCreate = 'course_create', _('Course Create')
-    PartialUpdate = 'partial_updates', _('Partial Update')
+    CoursePartialUpdate = 'course_partial_update', _('Course Partial Update')
     CourseRerun = 'course_rerun', _('Course Rerun')
+    CourseRunPartialUpdate = 'course_run_partial_update', _('Course Run Partial Update')
     CourseEditorUpdate = 'course_editor_update', _('Course Editor Update')
 
 

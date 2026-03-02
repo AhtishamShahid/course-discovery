@@ -454,11 +454,6 @@ class CSVLoaderMixin:
         beginner.name_t = 'beginner'
         beginner.save()
 
-        intermediate = LevelTypeFactory(name='Intermediate')
-        intermediate.set_current_language('en')
-        intermediate.name_t = 'Intermediate'
-        intermediate.save()
-
         SubjectFactory(name='Computer Science')
         SubjectFactory(name='Social Sciences')
 

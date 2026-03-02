@@ -2,7 +2,6 @@ import datetime
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 
-from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django_elasticsearch_dsl import Document
 from django_elasticsearch_dsl_drf.utils import EmptySearch
@@ -276,7 +275,6 @@ class DummyDocument(Document):
 
     class Django:
         model = DummyModel
-        queryset_pagination = settings.ELASTICSEARCH_DSL_QUERYSET_PAGINATION
 
 
 class MultiDocumentSerializerMixin:
