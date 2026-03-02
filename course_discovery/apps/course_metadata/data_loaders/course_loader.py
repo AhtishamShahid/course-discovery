@@ -100,7 +100,7 @@ class CourseLoader(AbstractDataLoader, DataLoaderMixin):
         logger.info(f"Initiating Course Loader for {self.task_type}")
         if self.task_type == BulkOperationType.CourseCreate:
             return self._ingest_course_create()
-        elif self.task_type == BulkOperationType.PartialUpdate:
+        elif self.task_type == BulkOperationType.CoursePartialUpdate:
             return self._ingest_partial_update()
         return NotImplementedError(
             f"Task type {self.task_type} is not implemented in CourseLoader."
@@ -121,7 +121,7 @@ class CourseLoader(AbstractDataLoader, DataLoaderMixin):
                 otherwise, an empty string.
         """
 
-        if self.task_type == BulkOperationType.PartialUpdate:
+        if self.task_type == BulkOperationType.CoursePartialUpdate:
             return ''
 
         missing_fields = []
@@ -207,7 +207,7 @@ class CourseLoader(AbstractDataLoader, DataLoaderMixin):
             )
             update_course_data['enterprise_subscription_inclusion'] = enterprise_subscription_inclusion
 
-        if self.task_type == BulkOperationType.PartialUpdate:
+        if self.task_type == BulkOperationType.CoursePartialUpdate:
             prune_empty_values(update_course_data)
 
         return update_course_data
@@ -268,7 +268,7 @@ class CourseLoader(AbstractDataLoader, DataLoaderMixin):
             if value:
                 update_course_run_data[db_field_name] = value
 
-        if self.task_type == BulkOperationType.PartialUpdate:
+        if self.task_type == BulkOperationType.CoursePartialUpdate:
             prune_empty_values(update_course_run_data)
 
         return update_course_run_data

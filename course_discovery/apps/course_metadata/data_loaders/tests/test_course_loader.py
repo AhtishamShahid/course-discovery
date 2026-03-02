@@ -87,14 +87,14 @@ class TestCourseLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
                     loader = CourseLoader(
                         self.partner, csv_path=csv.name,
                         product_source=self.source.slug,
-                        task_type=BulkOperationType.PartialUpdate
+                        task_type=BulkOperationType.CoursePartialUpdate
                     )
                     loader.ingest()
                     log_capture.check_present(
                         (
                             LOGGER_PATH,
                             'INFO',
-                            f"Initiating Course Loader for {BulkOperationType.PartialUpdate}"
+                            f"Initiating Course Loader for {BulkOperationType.CoursePartialUpdate}"
                         )
                     )
                     return loader, log_capture
