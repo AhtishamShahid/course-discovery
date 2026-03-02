@@ -43,7 +43,7 @@ from course_discovery.apps.course_metadata.toggles import (
 from course_discovery.apps.course_metadata.utils import (
     calculated_seat_upgrade_deadline, clean_html, convert_svg_to_png_from_url, create_missing_entitlement,
     download_and_save_course_image, download_and_save_program_image, ensure_draft_world, fetch_getsmarter_products,
-    generate_sku, is_google_drive_url, serialize_entitlement_for_ecommerce_api, serialize_seat_for_ecommerce_api,
+    is_google_drive_url, serialize_entitlement_for_ecommerce_api, serialize_seat_for_ecommerce_api,
     transform_skills_data, validate_slug_format
 )
 
@@ -1342,7 +1342,7 @@ class CourseSlugMethodsTests(TestCase):
         subject = SubjectFactory(name='business')
         organization = OrganizationFactory(name='test-organization')
         for course_count in range(3):
-            course = CourseFactory(title='Test Title')
+            course = CourseFactory(title='test-title')
             course.subjects.add(subject)
             course.authoring_organizations.add(organization)
             course.partner = partner
@@ -1353,7 +1353,7 @@ class CourseSlugMethodsTests(TestCase):
 
             assert error is None
             slug_end_prefix = f"-{course_count + 1}" if course_count else ""
-            assert slug == f"learn/{subject.slug}/{organization.name}-{slugify(course.title)}{slug_end_prefix}"
+            assert slug == f"learn/{subject.slug}/{organization.name}-{course.title}{slug_end_prefix}"
             course.set_active_url_slug(slug)
 
     def test_get_slug_for_exec_ed_course__with_existing_url_slug(self):
@@ -1417,32 +1417,6 @@ class CourseSlugMethodsTests(TestCase):
                 assert slug == f"boot-camps/{subject.slug}/{org.name}-{slugify(course.title)}"
             else:
                 assert slug == f"boot-camps/{subject.slug}/{org.name}-{slugify(course.title)}-{i}"
-            course.set_active_url_slug(slug)
-
-    def test_get_slug_for_ocm_course_with_existing_url_slug(self):
-        """
-        Verify that get slug utility factors in courses with same org, title, and subject in subdirectory
-        slug generation by prefixing the slugs with increasing integers.
-        """
-        partner = PartnerFactory()
-        subject = SubjectFactory(name='business')
-        organization = OrganizationFactory(name='test-organization')
-        for course_count in range(1, 4):
-            course = CourseFactory(title='Test title', partner=partner)
-            course.subjects.add(subject)
-            course.authoring_organizations.add(organization)
-            course.partner = partner
-            course.save()
-            course_url_slug = CourseUrlSlug.objects.get(course=course)
-            course_url_slug.url_slug = course.url_slug
-            course_url_slug.save()
-            RequestCache("active_url_cache").clear()
-            slug, error = utils.get_slug_for_course(course)
-            assert error is None
-            if course_count == 1:
-                assert slug == f"learn/{subject.slug}/{organization.name}-{slugify(course.title)}"
-            elif course_count > 1:
-                assert slug == f"learn/{subject.slug}/{organization.name}-{slugify(course.title)}-{course_count}"
             course.set_active_url_slug(slug)
 
     def test_get_existing_slug_count(self):
@@ -1676,34 +1650,3 @@ class ValidateSlugFormatTest(TestCase):
             expected_error_message = expected_error_message.format(url_slug=slug)
             actual_error_message = str(context.exception)
             self.assertIn(expected_error_message, actual_error_message)
-
-
-@ddt.ddt
-class ValidateDummySKU(TestCase):
-    """
-    Test suite for validate generated Dummy SKU by generate_sku method
-    """
-    def test_generate_sku_with_partner(self):
-        partner = mock.Mock(id=101)
-        course = mock.Mock(uuid='abc-uuid')
-        sku = generate_sku(partner=partner, course=course)
-        self.assertIsInstance(sku, str)
-        self.assertEqual(len(sku), 7)
-
-    def test_generate_sku_without_partner(self):
-        course = mock.Mock(uuid='abc-uuid', key='course-key')
-        sku = generate_sku(partner=None, course=course)
-        self.assertIsInstance(sku, str)
-        self.assertEqual(len(sku), 7)
-
-    def test_generate_sku_invalid_combination(self):
-        partner = mock.Mock(id=None)
-        course = mock.Mock(uuid='abc-uuid')
-        with self.assertRaises(ValidationError) as context:
-            generate_sku(partner=partner, course=course)
-        self.assertIn("Unexpected combition SKU", str(context.exception))
-
-    def test_generate_sku_missing_course(self):
-        partner = mock.Mock(id=101)
-        with self.assertRaises(ValidationError):
-            generate_sku(partner=partner, course=None)

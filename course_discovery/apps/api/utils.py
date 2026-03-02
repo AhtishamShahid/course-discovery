@@ -253,11 +253,10 @@ class StudioAPI:
     def generate_data_for_studio_api(cls, course_run, creating, user=None):
         editors = [editor.user for editor in course_run.course.editors.all()]
         key = CourseKey.from_string(course_run.key)
-        is_external = course_run.course.is_external_course
+
         # start, end, and pacing are not sent on updates - Studio is where users edit them
-        # Include start and end only if creating or if it's an external course during update
-        start = course_run.start if creating or is_external else None
-        end = course_run.end if creating or is_external else None
+        start = course_run.start if creating else None
+        end = course_run.end if creating else None
         pacing = course_run.pacing_type if creating else None
         enrollment_start = course_run.enrollment_start
         enrollment_end = course_run.enrollment_end
@@ -295,18 +294,16 @@ class StudioAPI:
                 'end': serialize_datetime(end),
             }
 
-        if not creating and (enrollment_start or enrollment_end):
+        if not creating and course_run.course.is_external_course and (enrollment_start or enrollment_end):
             # The dates are intentionally not allowed when creating the course run.
             # It is possible to send enrollment dates in API when the course run is being created.
             # But when the course run is created, in Studio or Discovery, the enrollment dates are not taken as input.
             # It is better to keep the flow consistent across places.
-            # Allow sending enrollment start and end dates as part of Update only.
-            # Using setdefault + update avoids overwriting and prevents KeyErrors.
-            data.setdefault('schedule', {})
-            data['schedule'].update({
+            # Allow sending enrollment start and end dates for external courses as part of Update only.
+            data['schedule'] = {
                 'enrollment_start': serialize_datetime(course_run.enrollment_start),
                 'enrollment_end': serialize_datetime(course_run.enrollment_end),
-            })
+            }
             logger.info(f"Enrollment information added to data {data} for course run {course_run.key}")
 
         return data

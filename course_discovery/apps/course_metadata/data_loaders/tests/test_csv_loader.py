@@ -7,7 +7,6 @@ from decimal import Decimal
 from tempfile import NamedTemporaryFile
 from unittest import mock
 
-import pytz
 import responses
 from ddt import data, ddt, unpack
 from edx_toggles.toggles.testutils import override_waffle_switch
@@ -23,7 +22,6 @@ from course_discovery.apps.course_metadata.data_loaders.constants import CSVInge
 from course_discovery.apps.course_metadata.data_loaders.csv_loader import CSVDataLoader
 from course_discovery.apps.course_metadata.data_loaders.tests import mock_data
 from course_discovery.apps.course_metadata.data_loaders.tests.mixins import CSVLoaderMixin
-from course_discovery.apps.course_metadata.data_loaders.tests.test_utils import MockExceptionWithResponse
 from course_discovery.apps.course_metadata.models import (
     AdditionalMetadata, Course, CourseEntitlement, CourseRun, CourseType, Seat, Source, TaxiForm
 )
@@ -36,7 +34,11 @@ from course_discovery.apps.course_metadata.toggles import (
 )
 
 LOGGER_PATH = 'course_discovery.apps.course_metadata.data_loaders.csv_loader'
-MIXIN_LOGGER_PATH = 'course_discovery.apps.course_metadata.data_loaders.mixins'
+
+
+class MockExceptionWithResponse(Exception):
+    def __init__(self, response_content):
+        self.response = mock.Mock(content=response_content)
 
 
 @ddt
@@ -98,21 +100,19 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
         with NamedTemporaryFile() as csv:
             csv = self._write_csv(csv, [mock_data.INVALID_ORGANIZATION_DATA])
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
-                    loader.ingest()
-                    self._assert_default_logs(log_capture)
-                    log_capture_mixin.check_present(
-                        (
-                            MIXIN_LOGGER_PATH,
-                            'ERROR',
-                            # pylint: disable=line-too-long
-                            '[MISSING_ORGANIZATION] Unable to locate partner organization with key invalid-organization '
-                            'for the course titled CSV Course.'
-                        )
+                loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
+                loader.ingest()
+                self._assert_default_logs(log_capture)
+                log_capture.check_present(
+                    (
+                        LOGGER_PATH,
+                        'ERROR',
+                        '[MISSING_ORGANIZATION] Unable to locate partner organization with key invalid-organization '
+                        'for the course titled CSV Course.'
                     )
-                    assert Course.objects.count() == 0
-                    assert CourseRun.objects.count() == 0
+                )
+                assert Course.objects.count() == 0
+                assert CourseRun.objects.count() == 0
 
     def test_invalid_course_type(self, jwt_decode_patch):  # pylint: disable=unused-argument
         """
@@ -122,20 +122,19 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
         with NamedTemporaryFile() as csv:
             csv = self._write_csv(csv, [mock_data.INVALID_COURSE_TYPE_DATA])
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
-                    loader.ingest()
-                    self._assert_default_logs(log_capture)
-                    log_capture_mixin.check_present(
-                        (
-                            MIXIN_LOGGER_PATH,
-                            'ERROR',
-                            '[MISSING_COURSE_TYPE] Unable to find the course enrollment track "invalid track"'
-                            ' for the course CSV Course'
-                        )
+                loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
+                loader.ingest()
+                self._assert_default_logs(log_capture)
+                log_capture.check_present(
+                    (
+                        LOGGER_PATH,
+                        'ERROR',
+                        '[MISSING_COURSE_TYPE] Unable to find the course enrollment track "invalid track"'
+                        ' for the course CSV Course'
                     )
-                    assert Course.objects.count() == 0
-                    assert CourseRun.objects.count() == 0
+                )
+                assert Course.objects.count() == 0
+                assert CourseRun.objects.count() == 0
 
     def test_invalid_course_run_type(self, jwt_decode_patch):  # pylint: disable=unused-argument
         """
@@ -145,67 +144,19 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
         with NamedTemporaryFile() as csv:
             csv = self._write_csv(csv, [mock_data.INVALID_COURSE_RUN_TYPE_DATA])
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
-                    loader.ingest()
-                    self._assert_default_logs(log_capture)
-                    log_capture_mixin.check_present(
-                        (
-                            MIXIN_LOGGER_PATH,
-                            'ERROR',
-                            '[MISSING_COURSE_RUN_TYPE] Unable to find the course run enrollment track "invalid track"'
-                            ' for the course CSV Course'
-                        )
-                    )
-                    assert Course.objects.count() == 0
-                    assert CourseRun.objects.count() == 0
-
-    @responses.activate
-    def test_course_run_update_start_and_end_dates(self, jwt_decode_patch):  # pylint: disable=unused-argument
-        """
-        Verify that 'start_date' and 'end_date' from CSV correctly update
-        the published CourseRun after CSV ingestion.
-        """
-        self._setup_prerequisites(self.partner)
-        self.mock_studio_calls(self.partner)
-        self.mock_ecommerce_publication(self.partner)
-        self.mock_image_response()
-        course = CourseFactory(
-            key=self.COURSE_KEY,
-            partner=self.partner,
-            type=self.course_type,
-            draft=True
-        )
-        CourseRunFactory(
-            course=course,
-            key=self.COURSE_RUN_KEY,
-            type=self.course_run_type,
-            status='published',
-            draft=True,
-            start=datetime.datetime(2030, 1, 1, tzinfo=pytz.UTC),
-            end=datetime.datetime(2030, 12, 31, tzinfo=pytz.UTC)
-        )
-        csv_data = copy.deepcopy(mock_data.VALID_COURSE_AND_COURSE_RUN_CSV_DICT)
-        csv_data.update({
-            "start_date": "01/01/2035",
-            "start_time": "09:30",
-            "end_date": "12/31/2035",
-            "end_time": "17:45"
-        })
-        expected_start = datetime.datetime(2035, 1, 1, 9, 30, tzinfo=pytz.UTC)
-        expected_end = datetime.datetime(2035, 12, 31, 17, 45, tzinfo=pytz.UTC)
-        with NamedTemporaryFile() as csv_file:
-            csv_file = self._write_csv(csv_file, [csv_data])
-            with mock.patch.object(CSVDataLoader, 'call_course_api', self.mock_call_course_api):
-                loader = CSVDataLoader(
-                    self.partner,
-                    csv_path=csv_file.name,
-                    product_source=self.source.slug
-                )
+                loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
                 loader.ingest()
-        course_run = CourseRun.objects.get(key=self.COURSE_RUN_KEY, draft=False)
-        assert course_run.start == expected_start, f"Expected start {expected_start}, got {course_run.start}"
-        assert course_run.end == expected_end, f"Expected end {expected_end}, got {course_run.end}"
+                self._assert_default_logs(log_capture)
+                log_capture.check_present(
+                    (
+                        LOGGER_PATH,
+                        'ERROR',
+                        '[MISSING_COURSE_RUN_TYPE] Unable to find the course run enrollment track "invalid track"'
+                        ' for the course CSV Course'
+                    )
+                )
+                assert Course.objects.count() == 0
+                assert CourseRun.objects.count() == 0
 
     @responses.activate
     def test_image_download_failure(self, jwt_decode_patch):  # pylint: disable=unused-argument
@@ -227,35 +178,34 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             csv = self._write_csv(csv, [mock_data.VALID_COURSE_AND_COURSE_RUN_CSV_DICT])
 
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    with mock.patch.object(
-                            CSVDataLoader,
-                            'call_course_api',
-                            self.mock_call_course_api
-                    ):
-                        loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
-                        loader.ingest()
+                with mock.patch.object(
+                        CSVDataLoader,
+                        '_call_course_api',
+                        self.mock_call_course_api
+                ):
+                    loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
+                    loader.ingest()
 
-                        self._assert_default_logs(log_capture)
-                        log_capture.check_present(
-                            (
-                                LOGGER_PATH,
-                                'INFO',
-                                'Course key edx+csv_123 could not be found in database, creating the course.'
-                            )
+                    self._assert_default_logs(log_capture)
+                    log_capture.check_present(
+                        (
+                            LOGGER_PATH,
+                            'INFO',
+                            'Course key edx+csv_123 could not be found in database, creating the course.'
                         )
+                    )
 
-                        # Creation call results in creating course and course run objects
-                        self.assertEqual(Course.everything.count(), 1)
-                        self.assertEqual(CourseRun.everything.count(), 1)
+                    # Creation call results in creating course and course run objects
+                    assert Course.everything.count() == 1
+                    assert CourseRun.everything.count() == 1
 
-                        log_capture_mixin.check_present(
-                            (
-                                MIXIN_LOGGER_PATH,
-                                'ERROR',
-                                '[IMAGE_DOWNLOAD_FAILURE] The course image download failed for the course CSV Course.'
-                            )
+                    log_capture.check_present(
+                        (
+                            LOGGER_PATH,
+                            'ERROR',
+                            '[IMAGE_DOWNLOAD_FAILURE] The course image download failed for the course CSV Course.'
                         )
+                    )
 
     @data(
         ('csv-course-custom-slug', 'executive-education/edx-csv-course', True),
@@ -286,7 +236,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(
@@ -398,7 +348,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(
@@ -488,7 +438,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -581,7 +531,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
                 with LogCapture(LOGGER_PATH) as log_capture:
                     with mock.patch.object(
                             CSVDataLoader,
-                            'call_course_api',
+                            '_call_course_api',
                             self.mock_call_course_api
                     ):
                         loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -709,7 +659,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
                 with LogCapture(LOGGER_PATH):
                     with mock.patch.object(
                             CSVDataLoader,
-                            'call_course_api',
+                            '_call_course_api',
                             self.mock_call_course_api
                     ):
                         loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -741,16 +691,17 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             csv = self._write_csv(csv, [mock_data.VALID_COURSE_AND_COURSE_RUN_CSV_DICT])
 
             with mock.patch.object(
-                CSVDataLoader, "call_course_api", self.mock_call_course_api
+                CSVDataLoader, "_call_course_api", self.mock_call_course_api
             ):
                 loader = CSVDataLoader(
                     self.partner, csv_path=csv.name, product_source=self.source.slug
                 )
+                # pylint: disable=protected-access
+                loader._register_ingestion_error = mock.MagicMock()
+                loader._update_course = mock.MagicMock()
 
-                loader.register_ingestion_error = mock.MagicMock()
-                loader.update_course = mock.MagicMock()
-
-                loader.update_course.side_effect = MockExceptionWithResponse(b"Update course error")
+                # pylint: disable=protected-access
+                loader._update_course.side_effect = MockExceptionWithResponse(b"Update course error")
 
                 with LogCapture(LOGGER_PATH):
                     loader.ingest()
@@ -759,11 +710,12 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
                         course_title=mock_data.VALID_COURSE_AND_COURSE_RUN_CSV_DICT["title"],
                         exception_message="Update course error",
                     )
-                    loader.register_ingestion_error.assert_called_once_with(
+                    # pylint: disable=protected-access
+                    loader._register_ingestion_error.assert_called_once_with(
                         CSVIngestionErrors.COURSE_UPDATE_ERROR, expected_error_message
                     )
-                    self.assertEqual(Course.everything.count(), 1)
-                    self.assertEqual(CourseRun.everything.count(), 1)
+                    assert Course.everything.count() == 1
+                    assert CourseRun.everything.count() == 1
 
     @responses.activate
     def test_exception_flow_for_update_course_entitlement_price(self, jwt_decode_patch):  # pylint: disable=unused-argument
@@ -814,13 +766,13 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             csv = self._write_csv(csv, [mock_data.VALID_COURSE_AND_COURSE_RUN_CSV_DICT, mocked_data])
             with override_waffle_switch(IS_COURSE_RUN_VARIANT_ID_EDITABLE, active=True):
                 with mock.patch.object(
-                    CSVDataLoader, "call_course_api", self.mock_call_course_api
+                    CSVDataLoader, "_call_course_api", self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(
                         self.partner, csv_path=csv.name, product_source=self.source.slug
                     )
-                    loader.register_ingestion_error = mock.MagicMock()
                     # pylint: disable=protected-access
+                    loader._register_ingestion_error = mock.MagicMock()
                     loader._update_course_entitlement_price = mock.MagicMock()
 
                     # pylint: disable=protected-access
@@ -835,7 +787,8 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
                             course_title=mock_data.VALID_COURSE_AND_COURSE_RUN_CSV_DICT["title"],
                             exception_message="Entitlement Price Update Error",
                         )
-                        loader.register_ingestion_error.assert_called_once_with(
+                        # pylint: disable=protected-access
+                        loader._register_ingestion_error.assert_called_once_with(
                             CSVIngestionErrors.COURSE_UPDATE_ERROR, expected_error_message
                         )
 
@@ -931,10 +884,10 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
 
             with mock.patch.object(
                 CSVDataLoader,
-                'call_course_api',
+                '_call_course_api',
                 self.mock_call_course_api
             ):
-                with mock.patch.object(CSVDataLoader, 'register_ingestion_error') as mock_register_error:
+                with mock.patch.object(CSVDataLoader, '_register_ingestion_error') as mock_register_error:
                     loader = CSVDataLoader(self.partner, product_source=self.source.slug, csv_path=csv.name)
                     loader.ingest()
 
@@ -959,48 +912,47 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             csv = self._write_csv(csv, [mock_data.INVALID_LANGUAGE])
 
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    with mock.patch.object(
-                            CSVDataLoader,
-                            'call_course_api',
-                            self.mock_call_course_api
-                    ):
-                        loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
-                        loader.ingest()
+                with mock.patch.object(
+                        CSVDataLoader,
+                        '_call_course_api',
+                        self.mock_call_course_api
+                ):
+                    loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
+                    loader.ingest()
 
-                        self._assert_default_logs(log_capture)
+                    self._assert_default_logs(log_capture)
 
-                        log_capture.check_present(
-                            (
-                                LOGGER_PATH,
-                                'INFO',
-                                'Course key edx+csv_123 could not be found in database, creating the course.'
-                            ),
-                            (
-                                LOGGER_PATH,
-                                'INFO',
-                                'Draft flag is set to True for the course CSV Course'
-                            )
+                    log_capture.check_present(
+                        (
+                            LOGGER_PATH,
+                            'INFO',
+                            'Course key edx+csv_123 could not be found in database, creating the course.'
+                        ),
+                        (
+                            LOGGER_PATH,
+                            'INFO',
+                            'Draft flag is set to True for the course CSV Course'
                         )
-                        log_capture_mixin.check_present(
-                            (
-                                MIXIN_LOGGER_PATH,
-                                'ERROR',
-                                '[COURSE_RUN_UPDATE_ERROR] Unable to update course run of the course CSV Course '
-                                'in the system. The update failed with the exception: '
-                                'Language gibberish-language from provided string gibberish-language'
-                                ' is either missing or an invalid ietf language'
-                            )
+                    )
+                    log_capture.check_present(
+                        (
+                            LOGGER_PATH,
+                            'ERROR',
+                            '[COURSE_RUN_UPDATE_ERROR] Unable to update course run of the course CSV Course '
+                            'in the system. The update failed with the exception: '
+                            'Language gibberish-language from provided string gibberish-language'
+                            ' is either missing or an invalid ietf language'
                         )
+                    )
 
-                        self.assertEqual(Course.everything.count(), 1)
-                        self.assertEqual(CourseRun.everything.count(), 1)
+                    assert Course.everything.count() == 1
+                    assert CourseRun.everything.count() == 1
 
-                        course = Course.everything.get(key=self.COURSE_KEY, partner=self.partner)
+                    course = Course.everything.get(key=self.COURSE_KEY, partner=self.partner)
 
-                        assert course.image.read() == image_content
-                        assert course.organization_logo_override.read() == image_content
-                        self._assert_course_data(course, self.BASE_EXPECTED_COURSE_DATA)
+                    assert course.image.read() == image_content
+                    assert course.organization_logo_override.read() == image_content
+                    self._assert_course_data(course, self.BASE_EXPECTED_COURSE_DATA)
 
     @responses.activate
     def test_ingest_flow_for_preexisting_unpublished_course(self, jwt_decode_patch):  # pylint: disable=unused-argument
@@ -1034,7 +986,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
 
@@ -1103,7 +1055,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
 
@@ -1154,7 +1106,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -1214,7 +1166,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -1289,7 +1241,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -1320,7 +1272,7 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             with LogCapture(LOGGER_PATH) as log_capture:
                 with mock.patch.object(
                         CSVDataLoader,
-                        'call_course_api',
+                        '_call_course_api',
                         self.mock_call_course_api
                 ):
                     loader = CSVDataLoader(self.partner, csv_path=csv.name, product_source=self.source.slug)
@@ -1397,24 +1349,23 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             csv = self._write_csv(csv, [csv_data])
 
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    loader = CSVDataLoader(
-                        self.partner, csv_path=csv.name, product_type=course_type[1], product_source=product_source
+                loader = CSVDataLoader(
+                    self.partner, csv_path=csv.name, product_type=course_type[1], product_source=product_source
+                )
+                loader.ingest()
+
+                self._assert_default_logs(log_capture)
+
+                log_capture.check_present(
+                    (
+                        LOGGER_PATH,
+                        'ERROR',
+                        expected_message
                     )
-                    loader.ingest()
+                )
 
-                    self._assert_default_logs(log_capture)
-
-                    log_capture_mixin.check_present(
-                        (
-                            MIXIN_LOGGER_PATH,
-                            'ERROR',
-                            expected_message
-                        )
-                    )
-
-                    assert Course.everything.count() == 0
-                    assert CourseRun.everything.count() == 0
+                assert Course.everything.count() == 0
+                assert CourseRun.everything.count() == 0
 
     @data(
         (['primary_subject', 'image', 'long_description'],
@@ -1480,21 +1431,20 @@ class TestCSVDataLoader(CSVLoaderMixin, OAuth2Mixin, APITestCase):
             csv = self._write_csv(csv, [csv_data])
 
             with LogCapture(LOGGER_PATH) as log_capture:
-                with LogCapture(MIXIN_LOGGER_PATH) as log_capture_mixin:
-                    loader = CSVDataLoader(
-                        self.partner, csv_path=csv.name, product_type=course_type[1], product_source=product_source
+                loader = CSVDataLoader(
+                    self.partner, csv_path=csv.name, product_type=course_type[1], product_source=product_source
+                )
+                loader.ingest()
+
+                self._assert_default_logs(log_capture)
+
+                log_capture.check_present(
+                    (
+                        LOGGER_PATH,
+                        'ERROR',
+                        expected_message
                     )
-                    loader.ingest()
+                )
 
-                    self._assert_default_logs(log_capture)
-
-                    log_capture_mixin.check_present(
-                        (
-                            MIXIN_LOGGER_PATH,
-                            'ERROR',
-                            expected_message
-                        )
-                    )
-
-                    assert Course.everything.count() == 0
-                    assert CourseRun.everything.count() == 0
+                assert Course.everything.count() == 0
+                assert CourseRun.everything.count() == 0

@@ -192,11 +192,10 @@ ECOMMERCE_API_BODIES = [
                 "structure": "child",
                 "expires": None,
                 "attribute_values": [],
-                "price": "0.00",
                 "stockrecords": [
                     {
                         "price_currency": "USD",
-                        "price_excl_tax": "0.00",
+                        "price": "0.00",
                         "partner_sku": "sku001",
                     }
                 ]
@@ -243,7 +242,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "EUR",
-                        "price_excl_tax": "25.00",
+                        "price": "25.00",
                         "partner_sku": "sku003",
                     }
                 ]
@@ -261,7 +260,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "EUR",
-                        "price_excl_tax": "250.00",
+                        "price": "250.00",
                         "partner_sku": "mobile.android.sku003",
                     }
                 ]
@@ -305,7 +304,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "USD",
-                        "price_excl_tax": "0.00",
+                        "price": "0.00",
                         "partner_sku": "sku005",
                     }
                 ]
@@ -322,7 +321,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "USD",
-                        "price_excl_tax": "25.00",
+                        "price": "25.00",
                         "partner_sku": "sku006",
                     }
                 ]
@@ -351,7 +350,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "USD",
-                        "price_excl_tax": "250.00",
+                        "price": "250.00",
                         "partner_sku": "sku007",
                     }
                 ]
@@ -405,7 +404,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "123",
-                        "price_excl_tax": "0.00",
+                        "price": "0.00",
                         "partner_sku": "sku009",
                     }
                 ]
@@ -430,7 +429,7 @@ ECOMMERCE_API_BODIES = [
                 "stockrecords": [
                     {
                         "price_currency": "USD",
-                        "price_excl_tax": "0.00",
+                        "price": "0.00",
                         "partner_sku": "sku010",
                     }
                 ]
@@ -3240,77 +3239,6 @@ VALID_COURSE_AND_COURSE_RUN_CSV_DICT = {
     "taxi_form_id": "test-form-id"
 }
 
-MINIMAL_VALID_COURSE_LOADER_COURSE_AND_COURSE_RUN_CREATION_CSV_DICT = {
-    'Organization': 'edx',
-    'Title': 'CSV Course',
-    'Number': 'csv-123',
-    'Course Enrollment Track': 'Audit Only',
-    'Start Date': '01/25/2020',
-    'End Date': '02/25/2020',
-    'Course Pacing': 'self-paced',
-    'Course Run Enrollment Track': 'Audit Only',
-}
-
-VALID_COURSE_LOADER_COURSE_AND_COURSE_RUN_CREATION_CSV_DICT = {
-    "Organization": "edx",
-    "Title": "Intro to Course Loader",
-    "Number": "CSL-603",
-    "Start Date": "2025-04-04",
-    "End Date": "2025-12-11",
-    "Course Pacing": "Self-paced",
-    "Course Enrollment Track": "Verified and Audit",
-    "Image": "https://example.com/image.jpg",
-    "Course Run Enrollment Track": "Verified and Audit",
-    "Primary Subject": "Computer Science",
-    "Publish Date": "2025-04-21",
-    "Length": "8",
-    "Verified Price": "500",
-    "Short Description": "Learn the basics of course loader.",
-    "Long Description": "A comprehensive introduction to course loader.",
-    "What will you Learn": "Variables, Loops, Functions",
-    "Level Type": "Intermediate",
-    "Minimum Effort": "4",
-    "Maximum Effort": "6",
-    "Move to Legal Review": "True"
-}
-
-VALID_COURSE_LOADER_COURSE_AND_COURSE_RUN_CREATION_CSV_DICT_WITH_OPTIONAL_FIELDS = {
-    **VALID_COURSE_LOADER_COURSE_AND_COURSE_RUN_CREATION_CSV_DICT,
-    "Secondary Subject": "Social Sciences",
-    "Tertiary Subject": "",
-    "Start Time": "00:00:00",
-    "End Time": "00:00:00",
-    "Content Language": "English - United States",
-    "Transcript Languages": "English - United States",
-    "Syllabus": "Less go",
-    "About Video Link": "",
-    "Prerequisites": "",
-    "Learner Testimonials": "123 - Me",
-    "Additional Information": "hmm",
-    "Organization Short Code Override": "UCS",
-    "Reg Close Date": "2025-04-11",
-    "Reg Close Time": "00:00:00",
-}
-
-COURSE_LOADER_COURSE_AND_COURSE_RUN_PARTIAL_UPDATES_SIMPLE = {
-    "Image": "https://placehold.co/1134x675.png",
-    "Length": "8",
-    "Short Description": "Learn the basics of course loader.",
-    "Level Type": "beginner",
-    "Minimum Effort": "4",
-    "Maximum Effort": "6",
-    "Course Key": "edx+csv-123",
-    "Course Run Key": "course-v1:edx+csv-123+1T2020",
-    "What Will You Learn": "Procrastination.",
-    "Watchers": "a@b.com, c@d.com",
-}
-
-COURSE_LOADER_COURSE_AND_COURSE_RUN_PARTIAL_UPDATES_FOR_REVIEW = {
-    "Primary Subject": "Computer Science",
-    "Long Description": "This is the long description",
-    "Publish Date": "2025-04-21",
-}
-
 VALID_MINIMAL_COURSE_AND_COURSE_RUN_CSV_DICT = {
     'organization': 'edx',
     'title': 'CSV Course',
@@ -3440,15 +3368,4 @@ VALID_PRODUCT_VALUE_CSV_DICT = {
     'PER CLICK INTERNATIONAL': 10,
     'PER LEAD USA': 10,
     'PER LEAD INTERNATIONAL': 10,
-}
-
-VALID_COURSE_RERUN_DATA = {
-    'last_active_run_key': 'course-v1:edx+csv_123+1T2020',
-    'start_date': '04/01/2025',
-    'end_date': '07/01/2025',
-    'start_time': '09:00:00',
-    'end_time': '17:00:00',
-    'run_type': 'Audit Only',
-    'pacing_type': 'Self-Paced',
-    'move_to_legal_review': 'FALSE'
 }

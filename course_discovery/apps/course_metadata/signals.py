@@ -1,17 +1,13 @@
-import functools
-import inspect
 import logging
 import time
 from datetime import datetime, timezone
 
-import pytz
 import waffle  # lint-amnesty, pylint: disable=invalid-django-waffle-import
-from celery import uuid
+from celery import shared_task
 from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.db.models import Q
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
@@ -23,21 +19,16 @@ from course_discovery.apps.core.models import Partner
 from course_discovery.apps.course_metadata.constants import MASTERS_PROGRAM_TYPE_SLUG
 from course_discovery.apps.course_metadata.data_loaders.api import CoursesApiDataLoader
 from course_discovery.apps.course_metadata.models import (
-    AdditionalMetadata, BulkOperationTask, CertificateInfo, Course, CourseEditor, CourseEntitlement,
-    CourseLocationRestriction, CourseRun, Curriculum, CurriculumCourseMembership, CurriculumProgramMembership, Degree,
-    DegreeAdditionalMetadata, DegreeCost, DegreeDeadline, Fact, GeoLocation, IconTextPairing, Organization, ProductMeta,
-    ProductValue, Program, ProgramLocationRestriction, Ranking, Seat, Specialization, TaxiForm
+    AdditionalMetadata, CertificateInfo, Course, CourseEditor, CourseEntitlement, CourseLocationRestriction, CourseRun,
+    Curriculum, CurriculumCourseMembership, CurriculumProgramMembership, Fact, GeoLocation, Organization, ProductMeta,
+    ProductValue, Program, Seat, TaxiForm
 )
 from course_discovery.apps.course_metadata.publishers import ProgramMarketingSitePublisher
 from course_discovery.apps.course_metadata.salesforce import (
     populate_official_with_existing_draft, requires_salesforce_update
 )
-from course_discovery.apps.course_metadata.tasks import (
-    process_bulk_operation, update_org_program_and_courses_ent_sub_inclusion
-)
-from course_discovery.apps.course_metadata.utils import (
-    data_modified_timestamp_update, data_modified_timestamp_update__deletion, get_salesforce_util
-)
+from course_discovery.apps.course_metadata.tasks import update_org_program_and_courses_ent_sub_inclusion
+from course_discovery.apps.course_metadata.utils import data_modified_timestamp_update, get_salesforce_util
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -186,7 +177,7 @@ def ensure_external_key_uniqueness__curriculum(sender, instance, **kwargs):  # p
     course_runs = CourseRun.objects.filter(
         course__degree_course_curricula=instance,
         external_key__isnull=False
-    ).iterator(chunk_size=settings.ITERATOR_CHUNK_SIZE)
+    ).iterator()
     check_curricula_and_related_programs_for_duplicate_external_key([instance], course_runs)
 
 
@@ -201,6 +192,7 @@ def update_or_create_salesforce_organization(instance, created, **kwargs):
             util.update_publisher_organization(instance)
 
 
+@shared_task
 @receiver(post_save, sender=Organization)
 def update_enterprise_inclusion_for_courses_and_programs(instance, created, **kwargs):  # pylint: disable=unused-argument
     update_org_program_and_courses_ent_sub_inclusion.delay(
@@ -456,19 +448,6 @@ def course_topics_taggable_changed(sender, instance, action, **kwargs):
         instance.set_data_modified_timestamp()
 
 
-@receiver(m2m_changed, sender=Program.labels.through)
-def program_labels_changed(sender, instance, action, **kwargs):
-    """
-    Signal handler to handle Taggable manager changes for the program labels field.
-    """
-    if action in ['pre_add', 'pre_remove'] and not kwargs['reverse'] \
-            and kwargs['pk_set'] and instance._meta.label in ['course_metadata.Program', 'course_metadata.Degree']:
-        logger.info(f"{sender} has been updated for Program {instance.uuid}.")
-        instance._meta.model.objects.filter(pk=instance.pk).update(
-            data_modified_timestamp=datetime.now(pytz.UTC)
-        )
-
-
 @receiver(m2m_changed, sender=AdditionalMetadata.facts.through)
 def additional_metadata_facts_changed(sender, instance, action, **kwargs):
     """
@@ -513,62 +492,10 @@ def course_run_staff_changed(sender, instance, action, **kwargs):  # pylint: dis
             instance.course.set_data_modified_timestamp()
 
 
-@receiver(m2m_changed, sender=Program.authoring_organizations.through)
-@receiver(m2m_changed, sender=Program.expected_learning_items.through)
-@receiver(m2m_changed, sender=Program.faq.through)
-@receiver(m2m_changed, sender=Program.instructor_ordering.through)
-@receiver(m2m_changed, sender=Program.credit_backing_organizations.through)
-@receiver(m2m_changed, sender=Program.corporate_endorsements.through)
-@receiver(m2m_changed, sender=Program.job_outlook_items.through)
-@receiver(m2m_changed, sender=Program.individual_endorsements.through)
-@receiver(m2m_changed, sender=Program.courses.through)
-@receiver(m2m_changed, sender=Degree.specializations.through)
-@receiver(m2m_changed, sender=Degree.rankings.through)
-def program_sorted_m2m_changed(sender, instance, action, **kwargs):
+def connect_course_data_modified_timestamp_related_models():
     """
-    Sorted m2m field, on a set(), first clears the field, and then adds the values. This makes it hard to
-    determine if the value has really changed, as from the local perspective of both a `clear` signal, or an
-    `add` signal there would be changes but globally, there might not be.
-
-    To circumvent that, we have chosen to hook into the `pre_clear` signal, and inside the signal handler,
-    traverse the stack to find the arguments that the sorted m2m field's `set()` was called with. We then
-    compare this value to the existing value to determine if there would be any changes.
-
-    This may break with newer versions of django-sortedm2m/django but I'd expect our tests to catch any such
-    scenarios.
-    """
-
-    field_name = sender._meta.model_name.split("_", 1)[1]
-
-    if action == 'pre_clear' and not kwargs['reverse']:
-        # when this signal is called from the m2m field's set(), the 5th frame from the bottom
-        # corresponds to the frame of the set method. the objs param of that method contains
-        # the values being set()
-        objs = inspect.stack()[4][0].f_locals['objs']
-        to_set = [obj if isinstance(obj, int) else obj.id for obj in objs]
-        already_set = list(getattr(instance, field_name).all().values_list('id', flat=True))
-
-        if to_set != already_set:
-            instance._meta.model.objects.filter(pk=instance.pk).update(
-                data_modified_timestamp=datetime.now(pytz.UTC)
-            )
-
-
-@receiver(m2m_changed, sender=Program.excluded_course_runs.through)
-def program_excluded_runs(sender, instance, action, **kwargs):  # pylint: disable=unused-argument
-    """
-    Signal handler to handle changes for the `excluded_course_runs` field on Programs.
-    """
-    if action in ['pre_add', 'pre_remove']:
-        instance._meta.model.objects.filter(pk=instance.pk).update(
-            data_modified_timestamp=datetime.now(pytz.UTC)
-        )
-
-
-def connect_product_data_modified_timestamp_related_models():
-    """
-    This wrapper is used to connect Course/Program model's related models (ForeignKey)
-    whose data change should update data_modified_timestamp in Course/Program model.
+    This wrapper is used to connect Course model's related models (ForeignKey)
+    whose data change should update data_modified_timestamp in Course model.
     """
     for model in [
         AdditionalMetadata,
@@ -582,32 +509,14 @@ def connect_product_data_modified_timestamp_related_models():
         Seat,
         Fact,
         TaxiForm,
-        ProgramLocationRestriction,
-        Curriculum,
-        CurriculumProgramMembership,
-        CurriculumCourseMembership,
-        DegreeCost,
-        DegreeDeadline,
-        DegreeAdditionalMetadata,
-        IconTextPairing,
-        Ranking,
-        Specialization
     ]:
         pre_save.connect(data_modified_timestamp_update, sender=model)
 
-    for model in [
-        Curriculum,
-        CurriculumProgramMembership,
-        CurriculumCourseMembership,
-        ProgramLocationRestriction
-    ]:
-        pre_delete.connect(data_modified_timestamp_update__deletion, sender=model)
 
-
-def disconnect_product_data_modified_timestamp_related_models():
+def disconnect_course_data_modified_timestamp_related_models():
     """
-    This wrapper is used to disconnect Course/Program model's related models (ForeignKey)
-    whose data change should update data_modified_timestamp in Course/Program model. This
+    This wrapper is used to disconnect Course model's related models (ForeignKey)
+    whose data change should update data_modified_timestamp in Course model. This
     is to be used in unit tests to disconnect these signals.
     """
     for model in [
@@ -621,35 +530,17 @@ def disconnect_product_data_modified_timestamp_related_models():
         ProductValue,
         Seat,
         Fact,
-        TaxiForm,
-        ProgramLocationRestriction,
-        Curriculum,
-        CurriculumProgramMembership,
-        CurriculumCourseMembership,
-        DegreeCost,
-        DegreeDeadline,
-        DegreeAdditionalMetadata,
-        IconTextPairing,
-        Ranking,
-        Specialization
+        TaxiForm
     ]:
         pre_save.disconnect(data_modified_timestamp_update, sender=model)
 
-    for model in [
-        Curriculum,
-        CurriculumProgramMembership,
-        CurriculumCourseMembership,
-        ProgramLocationRestriction
-    ]:
-        pre_delete.disconnect(data_modified_timestamp_update__deletion, sender=model)
 
-
-def disconnect_product_data_modified_timestamp_signal_handlers():
+def disconnect_course_data_modified_timestamp_signal_handlers():
     """
     Util method to disconnect all signal handlers that update data_modified_timestamp on
-    Course/Program models.
+    Course model.
     """
-    disconnect_product_data_modified_timestamp_related_models()
+    disconnect_course_data_modified_timestamp_related_models()
     m2m_changed.disconnect(product_meta_taggable_changed, sender=ProductMeta.keywords.through)
     m2m_changed.disconnect(course_topics_taggable_changed, sender=Course.topics.through)
     m2m_changed.disconnect(additional_metadata_facts_changed, sender=AdditionalMetadata.facts.through)
@@ -657,31 +548,14 @@ def disconnect_product_data_modified_timestamp_signal_handlers():
     m2m_changed.disconnect(course_collaborators_changed, Course.collaborators.through)
     m2m_changed.disconnect(course_subjects_changed, Course.subjects.through)
     m2m_changed.disconnect(course_run_staff_changed, CourseRun.staff.through)
-    m2m_changed.disconnect(program_labels_changed, sender=Program.labels.through)
-    m2m_changed.disconnect(program_excluded_runs, sender=Program.excluded_course_runs.through)
-
-    for m2m_field in [
-        Program.authoring_organizations.through,
-        Program.expected_learning_items.through,
-        Program.faq.through,
-        Program.instructor_ordering.through,
-        Program.credit_backing_organizations.through,
-        Program.corporate_endorsements.through,
-        Program.job_outlook_items.through,
-        Program.individual_endorsements.through,
-        Program.courses.through,
-        Degree.specializations.through,
-        Degree.rankings.through,
-    ]:
-        m2m_changed.disconnect(program_sorted_m2m_changed, sender=m2m_field)
 
 
-def connect_product_data_modified_timestamp_signal_handlers():
+def connect_course_data_modified_timestamp_signal_handlers():
     """
     Util method to connect all signal handlers that update data_modified_timestamp on
-    Course/Program models.
+    Course model.
     """
-    connect_product_data_modified_timestamp_related_models()
+    connect_course_data_modified_timestamp_related_models()
     m2m_changed.connect(product_meta_taggable_changed, sender=ProductMeta.keywords.through)
     m2m_changed.connect(course_topics_taggable_changed, sender=Course.topics.through)
     m2m_changed.connect(additional_metadata_facts_changed, sender=AdditionalMetadata.facts.through)
@@ -689,23 +563,6 @@ def connect_product_data_modified_timestamp_signal_handlers():
     m2m_changed.connect(course_collaborators_changed, Course.collaborators.through)
     m2m_changed.connect(course_subjects_changed, Course.subjects.through)
     m2m_changed.connect(course_run_staff_changed, CourseRun.staff.through)
-    m2m_changed.connect(program_labels_changed, sender=Program.labels.through)
-    m2m_changed.connect(program_excluded_runs, sender=Program.excluded_course_runs.through)
-
-    for m2m_field in [
-        Program.authoring_organizations.through,
-        Program.expected_learning_items.through,
-        Program.faq.through,
-        Program.instructor_ordering.through,
-        Program.credit_backing_organizations.through,
-        Program.corporate_endorsements.through,
-        Program.job_outlook_items.through,
-        Program.individual_endorsements.through,
-        Program.courses.through,
-        Degree.specializations.through,
-        Degree.rankings.through,
-    ]:
-        m2m_changed.connect(program_sorted_m2m_changed, sender=m2m_field)
 
 
 @receiver(m2m_changed, sender=User.groups.through)
@@ -744,26 +601,4 @@ def handle_organization_group_removal(sender, instance, action, pk_set, reverse,
             )
 
 
-def queue_bulk_operation_celery_task(bulk_operation_task):
-    """
-    Queues a celery task to process the given BulkOperationTask instance
-    """
-    task_uuid = uuid()
-    bulk_operation_task.task_id = task_uuid
-    bulk_operation_task.save()
-    process_bulk_operation.apply_async(args=[bulk_operation_task.id], task_id=task_uuid)
-
-
-@receiver(post_save, sender=BulkOperationTask)
-def on_bulk_operation_create(sender, instance, created, **kwargs):  # pylint: disable=unused-argument
-    """
-    When a new BulkOperationTask instance is created, schedule a Celery task to process it.
-    Use on_commit hooks to prevent any race conditions between the transaction commit and the
-    celery worker picking up the task
-    """
-    if created:
-        logger.info(f"BulkOperationTask with id {instance.id} created. Scheduling a celery task for its processing")
-        transaction.on_commit(functools.partial(queue_bulk_operation_celery_task, bulk_operation_task=instance))
-
-
-connect_product_data_modified_timestamp_related_models()
+connect_course_data_modified_timestamp_related_models()

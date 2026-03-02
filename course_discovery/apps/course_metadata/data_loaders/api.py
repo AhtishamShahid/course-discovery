@@ -1,4 +1,5 @@
 import concurrent.futures
+import html
 import logging
 import math
 import threading
@@ -47,13 +48,7 @@ class CoursesApiDataLoader(AbstractDataLoader):
     PAGE_SIZE = 50
 
     def __init__(self, partner, api_url=None, max_workers=None, is_threadsafe=False, enable_api=True):
-        super().__init__(
-            partner=partner,
-            api_url=api_url,
-            max_workers=max_workers,
-            is_threadsafe=is_threadsafe,
-            enable_api=enable_api
-        )
+        super().__init__(partner, api_url, max_workers, is_threadsafe, enable_api)
         self.default_product_source, __ = Source.objects.get_or_create(
             name=settings.DEFAULT_PRODUCT_SOURCE_NAME,
             slug=settings.DEFAULT_PRODUCT_SOURCE_SLUG
@@ -277,8 +272,9 @@ class CoursesApiDataLoader(AbstractDataLoader):
             'enrollment_start': self.parse_date(body['enrollment_start']),
             'enrollment_end': self.parse_date(body['enrollment_end']),
             'hidden': body.get('hidden', False),
+            'invite_only': body.get('invitation_only', False),
             'license': body.get('license') or '',  # license cannot be None
-            'title_override': body['name'],  # we support Studio edits, even though Publisher also owns titles
+            'title_override': html.unescape(body['name']),  # we support Studio edits, even though Publisher also owns titles
             'pacing_type': self.get_pacing_type(body)
         }
 
@@ -286,7 +282,7 @@ class CoursesApiDataLoader(AbstractDataLoader):
             defaults.update({
                 'short_description_override': body['short_description'],
                 'video': self.get_courserun_video(body),
-                'status': CourseRunStatus.Published,
+                'status': CourseRunStatus.Unpublished,
                 'mobile_available': body.get('mobile_available') or False,
             })
 
@@ -336,13 +332,7 @@ class EcommerceApiDataLoader(AbstractDataLoader):
     LOADER_MAX_RETRY = 2
 
     def __init__(self, partner, api_url, max_workers=None, is_threadsafe=False, **kwargs):
-        super().__init__(
-            partner=partner,
-            api_url=api_url,
-            max_workers=max_workers,
-            is_threadsafe=is_threadsafe,
-            **kwargs
-        )
+        super().__init__(partner, api_url, max_workers, is_threadsafe, **kwargs)
         self.initial_page = 1
         self.enrollment_skus = []
         self.entitlement_skus = []
@@ -446,11 +436,7 @@ class EcommerceApiDataLoader(AbstractDataLoader):
         empty_course_run_type = CourseRunType.objects.get(slug=CourseRunType.EMPTY)
         has_empty_type = (Q(type=empty_course_type, course_runs__seats__isnull=False) |
                           Q(course_runs__type=empty_course_run_type, course_runs__seats__isnull=False))
-        for course in (
-            Course.everything.filter(has_empty_type, partner=self.partner)
-            .distinct()
-            .iterator(chunk_size=settings.ITERATOR_CHUNK_SIZE)
-        ):
+        for course in Course.everything.filter(has_empty_type, partner=self.partner).distinct().iterator():
             if not calculate_course_type(course, commit=True):
                 logger.warning('Calculating course type failure occurred for [%s].', course)
                 self.processing_failure_occurred = True
@@ -589,7 +575,7 @@ class EcommerceApiDataLoader(AbstractDataLoader):
     def update_seat(self, course_run, product_body):
         stock_record = product_body['stockrecords'][0]
         currency_code = stock_record['price_currency']
-        price = Decimal(stock_record.get('price_excl_tax') or stock_record.get('price'))
+        price = Decimal(stock_record.get('price_excl_tax', stock_record['price']))
         sku = stock_record['partner_sku']
 
         # For more context see ADR docs/decisions/0025-dont-sync-mobile-skus-on-discovery.rst
@@ -660,7 +646,7 @@ class EcommerceApiDataLoader(AbstractDataLoader):
     def validate_stockrecord(self, stockrecords, title, product_class):
         """
         Argument:
-            stockrecords (list): a list of stock records to validate from ecommerce
+            sockrecords (list): a list of stock records to validate from ecommerce
             title (str): product title
             product_class (str): either entitlement or enrollment code
         Returns:
@@ -699,7 +685,7 @@ class EcommerceApiDataLoader(AbstractDataLoader):
 
         try:
             currency_code = stock_record['price_currency']
-            Decimal(stock_record.get('price_excl_tax') or stock_record.get('price'))
+            Decimal(stock_record.get('price_excl_tax', stock_record['price']))
             sku = stock_record['partner_sku']
         except (KeyError, ValueError):
             msg = 'A necessary stockrecord field is missing or incorrectly set for {product} {title}'.format(
@@ -738,7 +724,7 @@ class EcommerceApiDataLoader(AbstractDataLoader):
 
         stock_record = stockrecords[0]
         currency_code = stock_record['price_currency']
-        price = Decimal(stock_record.get('price_excl_tax') or stock_record.get('price'))
+        price = Decimal(stock_record.get('price_excl_tax', stock_record['price']))
         sku = stock_record['partner_sku']
 
         try:
@@ -866,12 +852,7 @@ class ProgramsApiDataLoader(AbstractDataLoader):
     XSERIES = None
 
     def __init__(self, partner, api_url, max_workers=None, is_threadsafe=False):
-        super().__init__(
-            partner=partner,
-            api_url=api_url,
-            max_workers=max_workers,
-            is_threadsafe=is_threadsafe
-        )
+        super().__init__(partner, api_url, max_workers, is_threadsafe)
         self.XSERIES = ProgramType.objects.get(translations__name_t='XSeries')
 
     def ingest(self):
@@ -937,12 +918,14 @@ class ProgramsApiDataLoader(AbstractDataLoader):
         # The course_code key field is technically useless, so we must build the course list from the
         # associated course runs.
         courses = Course.objects.filter(course_runs__key__in=course_run_keys).distinct()
-        program.courses.set(courses)
+        program.courses.clear()
+        program.courses.add(*courses)
 
         # Do a diff of all the course runs and the explicitly-associated course runs to determine
         # which course runs should be explicitly excluded.
         excluded_course_runs = CourseRun.objects.filter(course__in=courses).exclude(key__in=course_run_keys)
-        program.excluded_course_runs.set(excluded_course_runs)
+        program.excluded_course_runs.clear()
+        program.excluded_course_runs.add(*excluded_course_runs)
 
     def _update_program_organizations(self, body, program):
         uuid = self._get_uuid(body)
@@ -952,7 +935,8 @@ class ProgramsApiDataLoader(AbstractDataLoader):
         if len(org_keys) != organizations.count():
             logger.error('Organizations for program [%s] are invalid!', uuid)
 
-        program.authoring_organizations.set(organizations)
+        program.authoring_organizations.clear()
+        program.authoring_organizations.add(*organizations)
 
     def _get_banner_image_url(self, body):
         image_key = f'w{self.image_width}h{self.image_height}'

@@ -99,6 +99,7 @@ class CourseRunViewSet(CompressedCacheResponseMixin, ValidElasticSearchQueryRequ
             queryset = CourseEditor.editable_course_runs(self.request.user, queryset)
         else:
             queryset = self.queryset
+            queryset = queryset.filter(status=CourseRunStatus.Published)
 
         if self.request.method == 'GET':
             queryset = queryset.exclude(restricted_run__restriction_type__in=excluded_restriction_types)
@@ -354,18 +355,6 @@ class CourseRunViewSet(CompressedCacheResponseMixin, ValidElasticSearchQueryRequ
 
         serializer = self.get_serializer(course_run, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-
-        course_type = course_run.course.type
-        course_run_type = serializer.validated_data.get('type')
-
-        if course_type and course_run_type and course_run_type not in course_type.course_run_types.all():
-            return Response(
-                _("The course run type '{course_run_type}' is not valid for this course type '{course_type}'.").format(
-                    course_run_type=course_run_type,
-                    course_type=course_type
-                ),
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
         # Handle staff update on course run in review with valid status transition
         if (request.user.is_staff and course_run.in_review and 'status' in request.data and
