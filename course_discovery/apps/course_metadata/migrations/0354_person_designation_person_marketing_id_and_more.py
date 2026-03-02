@@ -44,6 +44,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='personsocialnetwork',
             name='type',
-            field=models.CharField(choices=[('blog', 'Blog'), ('dribbble', 'Dribbble'), ('facebook', 'Facebook'), ('github', 'github'), ('instagram', 'Instagram'), ('linkedin', 'LinkedIn'), ('medium', 'medium'), ('others', 'Others'), ('skype', 'Skype'), ('stackoverflow', 'stackoverflow'), ('twitter', 'Twitter'), ('youtube', 'Youtube')], db_index=True, max_length=15),
+            field=models.CharField(choices=[('blog', 'Blog'), ('dribbble', 'Dribbble'), ('facebook', 'Facebook'), ('github', 'GitHub'), ('instagram', 'Instagram'), ('linkedin', 'LinkedIn'), ('medium', 'Medium'), ('others', 'Others'), ('skype', 'Skype'), ('stackoverflow', 'Stack Overflow'), ('twitter', 'Twitter'), ('youtube', 'Youtube')], db_index=True, max_length=15),
         ),
     ]
